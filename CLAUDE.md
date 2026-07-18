@@ -55,7 +55,7 @@ yt-summariser/
 │   ├── main.py            # FastAPI app, CORS, route registration
 │   ├── transcript.py      # youtube-transcript-api logic + error handling
 │   ├── pipeline.py        # LangChain summarise chain + Q&A chain
-│   ├── memory.py          # ConversationBufferMemory setup per session
+│   ├── memory.py          # windowed/summary memory setup per session
 │   ├── prompts.py         # All prompt templates (summarise + Q&A)
 │   ├── database.py        # SQLAlchemy engine, session, models
 │   ├── requirements.txt
@@ -234,9 +234,9 @@ showError(msg)            → displays error banner
 
 1. **Transcript caching** — always check `videos` table before fetching + running LLM. Same video should never cost two API calls.
 
-2. **map_reduce summarisation** — use `chain_type="map_reduce"` in `load_summarize_chain`, not `stuff`. The `stuff` type fails on videos longer than ~10 minutes.
+2. **Adaptive summarisation** — check transcript token length first. If it fits in the model's context window (Gemini Flash's is very large, so most 1-2hr videos will), use `chain_type="stuff"` — one LLM call, cheaper, and keeps narrative coherence. Only fall back to `chain_type="map_reduce"` (or `refine`) for the rare transcript that actually exceeds the context budget. Unconditional `map_reduce` wastes calls and can fragment the summary across chunks.
 
-3. **Memory reconstruction** — don't store a live memory object. Rebuild `ConversationBufferMemory` from DB messages on every `/chat` request. This is stateless and works correctly with Railway's ephemeral containers.
+3. **Memory reconstruction, capped** — don't store a live memory object. Rebuild memory from DB messages on every `/chat` request (stateless, works with Railway's ephemeral containers) — but don't load the *full* history unbounded, since long chat threads would eventually blow the context window too. Cap to the last N turns (`ConversationBufferWindowMemory`) or summarise older turns (`ConversationSummaryBufferMemory`).
 
 4. **CORS** — add `CORSMiddleware` to FastAPI allowing the Vercel frontend origin. In dev, allow `http://localhost:3000`.
 
@@ -256,7 +256,7 @@ fastapi
 uvicorn
 python-dotenv
 langchain
-langchain-openai
+langchain-google-genai
 youtube-transcript-api
 sqlalchemy
 psycopg2-binary
@@ -285,6 +285,6 @@ Build in this exact order to avoid blocked dependencies:
 - Local setup instructions (`docker compose up`)
 - Environment variables guide
 - Architecture diagram description
-- Design decisions section explaining: why map_reduce, why memory reconstruction, why transcript caching
+- Design decisions section explaining: why adaptive stuff/map_reduce, why capped memory reconstruction, why transcript caching
 - Deployment guide (Railway + Vercel + Supabase)
 ```
