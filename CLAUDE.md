@@ -17,7 +17,7 @@ A full-stack AI-powered YouTube video summariser and Q&A chatbot.
 ### Backend
 - Python + FastAPI
 - Two endpoints: `POST /summarise` and `POST /chat`
-- Deployed on Railway via Dockerfile
+- Deployed on Hugging Face Spaces (Docker SDK) — free, no credit card required, backend/ pushed as its own Space via `git subtree`
 
 ### AI Layer (LangChain — current LCEL-style API, not the legacy `langchain.chains`/`langchain.memory` API)
 - `youtube-transcript-api` — fetches video transcripts (no YouTube API key needed); video duration is derived from the last transcript snippet's `start + duration`, not a separate API call
@@ -44,7 +44,7 @@ A full-stack AI-powered YouTube video summariser and Q&A chatbot.
 
 ### Env Management
 - `python-dotenv` locally
-- Railway environment variables in production
+- Hugging Face Space secrets (Settings → Variables and secrets) in production
 - Vercel environment variables for frontend (if needed)
 
 ---
@@ -152,7 +152,7 @@ Note: `summarise_transcript()` in `pipeline.py` returns this shape via `llm.with
 Returns all messages for a given video so the frontend can restore chat on page reload.
 
 ### `GET /health`
-Returns `{ "status": "ok" }` — used by Railway for health checks.
+Returns `{ "status": "ok" }` — used for host health checks.
 
 ---
 
@@ -243,7 +243,7 @@ showError(msg)            → displays error banner
 
 2. **Adaptive summarisation** — check transcript token length first. If it fits in the model's context window (Gemini Flash's is very large, so most 1-2hr videos will), use `chain_type="stuff"` — one LLM call, cheaper, and keeps narrative coherence. Only fall back to `chain_type="map_reduce"` (or `refine`) for the rare transcript that actually exceeds the context budget. Unconditional `map_reduce` wastes calls and can fragment the summary across chunks.
 
-3. **Memory reconstruction, capped** — don't store a live memory object. Rebuild the chat history from DB messages on every `/chat` request (stateless, works with Railway's ephemeral containers) — but don't load the *full* history unbounded, since long chat threads would eventually blow the context window too. `memory.py` queries only the last N turns from Postgres and formats them into the prompt directly.
+3. **Memory reconstruction, capped** — don't store a live memory object. Rebuild the chat history from DB messages on every `/chat` request (stateless, works with ephemeral containers that lose in-memory state on restart) — but don't load the *full* history unbounded, since long chat threads would eventually blow the context window too. `memory.py` queries only the last N turns from Postgres and formats them into the prompt directly.
 
 4. **CORS** — add `CORSMiddleware` to FastAPI allowing the Vercel frontend origin. In dev, allow `http://localhost:3000`.
 
@@ -295,5 +295,5 @@ Build in this exact order to avoid blocked dependencies:
 - Environment variables guide
 - Architecture diagram description
 - Design decisions section explaining: why adaptive stuff/map_reduce, why capped memory reconstruction, why transcript caching
-- Deployment guide (Railway + Vercel + Supabase)
+- Deployment guide (Hugging Face Spaces + Vercel + Supabase)
 ```
