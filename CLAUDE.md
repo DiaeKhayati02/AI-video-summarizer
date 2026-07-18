@@ -19,15 +19,17 @@ A full-stack AI-powered YouTube video summariser and Q&A chatbot.
 - Two endpoints: `POST /summarise` and `POST /chat`
 - Deployed on Railway via Dockerfile
 
-### AI Layer (LangChain)
-- `youtube-transcript-api` — fetches video transcripts (no YouTube API key needed)
-- `RecursiveCharacterTextSplitter` — chunks transcripts, only invoked when a transcript exceeds the model's context budget
-- `load_summarize_chain` — `stuff` by default; falls back to `map_reduce` (or `refine`) only for transcripts too long to fit in context
-- `LLMChain` + `ConversationBufferWindowMemory` (or `ConversationSummaryBufferMemory`) — powers contextual Q&A, capped rather than unbounded
-- All prompt templates live in `prompts.py`
+### AI Layer (LangChain — current LCEL-style API, not the legacy `langchain.chains`/`langchain.memory` API)
+- `youtube-transcript-api` — fetches video transcripts (no YouTube API key needed); video duration is derived from the last transcript snippet's `start + duration`, not a separate API call
+- Video title/channel name come from YouTube's public oEmbed endpoint (`youtube.com/oembed`) — no API key needed, but also no subscriber count (that requires the quota-limited YouTube Data API v3, which this project deliberately doesn't use)
+- `langchain_text_splitters.RecursiveCharacterTextSplitter` — chunks transcripts, only invoked when a transcript exceeds the model's context budget
+- Summarisation via `PromptTemplate | llm.with_structured_output(VideoSummary)` (LCEL): single call by default, returning `{description, key_takeaways, suggested_questions}`; falls back to a hand-rolled map-reduce (map each chunk to plain text, then one structured combine call) only for transcripts too long to fit in context
+- Q&A via `PromptTemplate | llm`; chat history is capped to the last N turns, read straight from the `messages` table (no live memory object — see `memory.py`)
+- All prompt templates live in `prompts.py` (built on `langchain_core.prompts.PromptTemplate`)
+- Note: `langchain` 1.x removed `load_summarize_chain`, `LLMChain`, and `langchain.memory` from the top-level package — don't reintroduce them. Depend directly on `langchain-core`, `langchain-text-splitters`, and `langchain-google-genai`.
 
 ### LLM
-- `gemini-1.5-flash` (primary) via `langchain-google-genai` — cheap, fast, very large context window
+- `gemini-flash-latest` (primary) via `langchain-google-genai` — Google's rolling alias to the current stable Flash model, so it doesn't rot when specific model versions get retired (`gemini-1.5-flash` was removed from the API entirely mid-project)
 - Model is configurable via `.env` (`MODEL_NAME`) so it can be swapped (e.g. to an OpenAI model) without code changes
 
 ### Database
@@ -59,7 +61,8 @@ yt-summariser/
 │   ├── prompts.py         # All prompt templates (summarise + Q&A)
 │   ├── database.py        # SQLAlchemy engine, session, models
 │   ├── requirements.txt
-│   └── Dockerfile
+│   ├── Dockerfile
+│   └── .dockerignore      # must live here, not at repo root — this is the Docker build context
 ├── frontend/
 │   ├── index.html
 │   ├── style.css
@@ -67,7 +70,6 @@ yt-summariser/
 ├── docker-compose.yml
 ├── .env                   # Never committed
 ├── .env.example           # Committed — shows required keys
-├── .dockerignore
 └── README.md
 ```
 
@@ -109,16 +111,22 @@ CREATE TABLE messages (
 ```
 **Behaviour:**
 1. Extract video_id from URL
-2. Check `videos` table — if summary exists, return cached result
-3. If not: fetch transcript → split → run summarise chain → store in DB → return
+2. Check `videos` table — if a structured summary is already cached (JSON-encoded in `videos.summary`), return it
+3. If not: fetch transcript + duration, look up title/channel via YouTube's oEmbed endpoint (no API key needed), run the structured-output summarise call, cache the JSON blob in `videos.summary`, return
 **Response:**
 ```json
 {
   "video_id": "abc123",
-  "summary": "...",
+  "title": "...",
+  "channel_name": "...",
+  "duration_seconds": 754,
+  "description": "...",
+  "key_takeaways": ["...", "..."],
+  "suggested_questions": ["...", "..."],
   "cached": false
 }
 ```
+Note: `summarise_transcript()` in `pipeline.py` returns this shape via `llm.with_structured_output(VideoSummary)` (a Pydantic model), not free-form markdown — this is deliberately more reliable than asking the model for markdown and parsing it, since the sidebar UI needs the description and key takeaways as distinct fields, not prose.
 
 ### `POST /chat`
 **Request:**
@@ -155,7 +163,7 @@ Returns `{ "status": "ok" }` — used by Railway for health checks.
 
 # LLM
 GOOGLE_API_KEY=your_key_here
-MODEL_NAME=gemini-1.5-flash   # confirm the current Gemini Flash model name/version before deploying
+MODEL_NAME=gemini-flash-latest   # Google's rolling alias to the current stable Flash model
 
 # Supabase
 DATABASE_URL=postgresql://postgres:[password]@db.[project].supabase.co:5432/postgres
@@ -180,7 +188,6 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 ### docker-compose.yml
 ```yaml
-version: "3.9"
 services:
   backend:
     build: ./backend
@@ -236,7 +243,7 @@ showError(msg)            → displays error banner
 
 2. **Adaptive summarisation** — check transcript token length first. If it fits in the model's context window (Gemini Flash's is very large, so most 1-2hr videos will), use `chain_type="stuff"` — one LLM call, cheaper, and keeps narrative coherence. Only fall back to `chain_type="map_reduce"` (or `refine`) for the rare transcript that actually exceeds the context budget. Unconditional `map_reduce` wastes calls and can fragment the summary across chunks.
 
-3. **Memory reconstruction, capped** — don't store a live memory object. Rebuild memory from DB messages on every `/chat` request (stateless, works with Railway's ephemeral containers) — but don't load the *full* history unbounded, since long chat threads would eventually blow the context window too. Cap to the last N turns (`ConversationBufferWindowMemory`) or summarise older turns (`ConversationSummaryBufferMemory`).
+3. **Memory reconstruction, capped** — don't store a live memory object. Rebuild the chat history from DB messages on every `/chat` request (stateless, works with Railway's ephemeral containers) — but don't load the *full* history unbounded, since long chat threads would eventually blow the context window too. `memory.py` queries only the last N turns from Postgres and formats them into the prompt directly.
 
 4. **CORS** — add `CORSMiddleware` to FastAPI allowing the Vercel frontend origin. In dev, allow `http://localhost:3000`.
 
@@ -255,9 +262,11 @@ showError(msg)            → displays error banner
 fastapi
 uvicorn
 python-dotenv
-langchain
+langchain-core
+langchain-text-splitters
 langchain-google-genai
 youtube-transcript-api
+requests
 sqlalchemy
 psycopg2-binary
 pydantic
