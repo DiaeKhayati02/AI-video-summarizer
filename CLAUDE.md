@@ -21,14 +21,14 @@ A full-stack AI-powered YouTube video summariser and Q&A chatbot.
 
 ### AI Layer (LangChain)
 - `youtube-transcript-api` — fetches video transcripts (no YouTube API key needed)
-- `RecursiveCharacterTextSplitter` — chunks long transcripts
-- `load_summarize_chain` with `map_reduce` type — handles long video summarisation
-- `LLMChain` + `ConversationBufferMemory` — powers contextual Q&A
+- `RecursiveCharacterTextSplitter` — chunks transcripts, only invoked when a transcript exceeds the model's context budget
+- `load_summarize_chain` — `stuff` by default; falls back to `map_reduce` (or `refine`) only for transcripts too long to fit in context
+- `LLMChain` + `ConversationBufferWindowMemory` (or `ConversationSummaryBufferMemory`) — powers contextual Q&A, capped rather than unbounded
 - All prompt templates live in `prompts.py`
 
 ### LLM
-- `gpt-4o-mini` (primary) — cheap, fast, good quality
-- Model is configurable via `.env` so it can be swapped to `gemini-1.5-flash`
+- `gemini-1.5-flash` (primary) via `langchain-google-genai` — cheap, fast, very large context window
+- Model is configurable via `.env` (`MODEL_NAME`) so it can be swapped (e.g. to an OpenAI model) without code changes
 
 ### Database
 - Supabase (hosted PostgreSQL)
@@ -131,7 +131,7 @@ CREATE TABLE messages (
 **Behaviour:**
 1. Load transcript from DB by video_id
 2. Load message history from `messages` table for this video_id
-3. Rebuild ConversationBufferMemory from history
+3. Rebuild memory from history, capped to the last N turns (or summarised if older)
 4. Run Q&A chain with transcript as context + memory
 5. Save user message + assistant response to `messages` table
 6. Return answer
@@ -154,8 +154,8 @@ Returns `{ "status": "ok" }` — used by Railway for health checks.
 # .env.example
 
 # LLM
-OPENAI_API_KEY=your_key_here
-MODEL_NAME=gpt-4o-mini
+GOOGLE_API_KEY=your_key_here
+MODEL_NAME=gemini-1.5-flash   # confirm the current Gemini Flash model name/version before deploying
 
 # Supabase
 DATABASE_URL=postgresql://postgres:[password]@db.[project].supabase.co:5432/postgres
