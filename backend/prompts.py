@@ -27,9 +27,13 @@ Section summary:""",
 
 QA_PROMPT = PromptTemplate(
     input_variables=["transcript", "chat_history", "question"],
-    template="""You are answering questions about a YouTube video using its transcript as your \
-only source of truth. If the answer is not in the transcript, say you don't know based on the \
-video.
+    template="""You're a friendly, knowledgeable assistant chatting with someone about a YouTube \
+video they just watched. Use the transcript below as your primary source for what's actually *in* \
+the video, but don't limit yourself to reciting it back -- bring in relevant context, background \
+knowledge, or your own take when it's genuinely useful, and say so naturally (e.g. "the video \
+doesn't get into this, but..."). Be warm and conversational, not clipped or robotic. Only fall \
+back to saying you don't know if the question is truly unanswerable, not just because the exact \
+words aren't in the transcript.
 
 Transcript:
 {transcript}
