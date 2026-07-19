@@ -1,8 +1,7 @@
 // Locally (docker-compose), the backend is same-machine on :8000. Deployed,
 // frontend (Vercel) and backend (Render) live on different domains, so we
-// point at the deployed backend URL instead. Update PROD_BACKEND_URL once
-// the Render service exists -- its URL isn't known until first deploy.
-const PROD_BACKEND_URL = "https://ai-video-summarizer-backend.onrender.com";
+// point at the deployed backend URL instead.
+const PROD_BACKEND_URL = "https://ai-video-summarizer-backend-b2l6.onrender.com";
 const IS_LOCAL = ["localhost", "127.0.0.1"].includes(window.location.hostname);
 const BACKEND_URL = window.BACKEND_URL || (IS_LOCAL ? "http://localhost:8000" : PROD_BACKEND_URL);
 
