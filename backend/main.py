@@ -13,7 +13,13 @@ from sqlalchemy.orm import Session
 from database import Base, Message, Video, engine, get_db
 from memory import build_chat_history, save_message
 from pipeline import answer_question, summarise_transcript
-from transcript import TranscriptUnavailableError, extract_video_id, fetch_oembed_metadata, fetch_transcript
+from transcript import (
+    TranscriptFetchBlockedError,
+    TranscriptUnavailableError,
+    extract_video_id,
+    fetch_oembed_metadata,
+    fetch_transcript,
+)
 
 Base.metadata.create_all(bind=engine)
 
@@ -76,6 +82,8 @@ def summarise(payload: SummariseRequest, db: Session = Depends(get_db)):
         transcript, duration_seconds = fetch_transcript(video_id)
     except TranscriptUnavailableError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except TranscriptFetchBlockedError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     metadata = fetch_oembed_metadata(payload.url)
     result = summarise_transcript(transcript)

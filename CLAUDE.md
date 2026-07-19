@@ -252,7 +252,7 @@ showError(msg)            → displays error banner
    - `https://youtu.be/VIDEO_ID`
    - `https://www.youtube.com/embed/VIDEO_ID`
 
-6. **Error handling** — wrap transcript fetch in try/except. `youtube-transcript-api` raises `TranscriptsDisabled` and `NoTranscriptFound` — catch both and return a 400 with a clear message.
+6. **Error handling** — wrap transcript fetch in try/except. `youtube-transcript-api` raises `TranscriptsDisabled` and `NoTranscriptFound` for videos that genuinely lack captions — catch both, return a 400. Separately, it raises `RequestBlocked`/`IpBlocked` when YouTube blocks the *server's* IP (near-universal on cloud hosts — Render, Railway, AWS, GCP, etc. all get blocked, since YouTube blocklists datacenter IP ranges broadly, not any specific provider) — catch this separately and return a 503, since it's an infra issue, not a bad video. The only reliable fix is routing through a *residential* rotating proxy (`WEBSHARE_PROXY_USERNAME`/`PASSWORD` in `.env`, wired up in `transcript.py`) — datacenter proxies, including Webshare's own free tier, get blocked the same way an unproxied cloud host does.
 
 ---
 
