@@ -99,10 +99,56 @@ function renderSummary(data) {
   newSummaryBtn.classList.remove("hidden");
 }
 
+function escapeHtml(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function renderInline(text) {
+  return escapeHtml(text).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+}
+
+// Converts the markdown a chat answer might contain (headings, bold, bullet
+// lists, horizontal rules, paragraphs) to safe HTML, instead of showing
+// literal "**"/"*" characters.
+function markdownToHtml(markdown) {
+  const blocks = markdown.trim().split(/\n\s*\n/);
+
+  return blocks
+    .map((block) => {
+      const lines = block
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      if (lines.length === 0) return "";
+
+      if (lines.length === 1 && /^-{3,}$/.test(lines[0])) {
+        return "<hr>";
+      }
+
+      const headingMatch = lines.length === 1 && lines[0].match(/^(#{1,6})\s+(.*)$/);
+      if (headingMatch) {
+        const level = Math.min(headingMatch[1].length + 2, 6);
+        return `<h${level}>${renderInline(headingMatch[2])}</h${level}>`;
+      }
+
+      if (lines.every((line) => /^[*-]\s+/.test(line))) {
+        const items = lines.map((line) => `<li>${renderInline(line.replace(/^[*-]\s+/, ""))}</li>`).join("");
+        return `<ul>${items}</ul>`;
+      }
+
+      return `<p>${lines.map(renderInline).join(" ")}</p>`;
+    })
+    .join("\n");
+}
+
 function renderMessage(content, role) {
   const bubble = document.createElement("div");
   bubble.classList.add("chat-bubble", role === "user" ? "chat-bubble--user" : "chat-bubble--assistant");
-  bubble.textContent = content;
+  if (role === "user") {
+    bubble.textContent = content;
+  } else {
+    bubble.innerHTML = markdownToHtml(content);
+  }
   chatMessages.appendChild(bubble);
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
